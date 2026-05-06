@@ -172,6 +172,12 @@ button:active {
   transform: translateY(1px);
 }
 
+button:disabled {
+  cursor: default;
+  filter: grayscale(0.8);
+  opacity: 0.58;
+}
+
 .hud {
   min-height: 380px;
   padding: 16px;
@@ -261,6 +267,52 @@ button:active {
   text-shadow: 2px 2px 0 #0d1113;
 }
 
+.score-form {
+  display: grid;
+  grid-template-columns: auto minmax(160px, 1fr) auto minmax(130px, auto);
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+  padding: 10px;
+  border: 3px solid rgba(137, 150, 107, 0.62);
+  background: rgba(13, 17, 19, 0.48);
+}
+
+.score-form.hidden {
+  display: none;
+}
+
+.score-form label,
+#scoreMessage {
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.score-form input {
+  min-height: 38px;
+  border: 3px solid rgba(137, 150, 107, 0.75);
+  outline: 0;
+  background: #12191c;
+  color: var(--ink);
+  font: 800 1rem "Courier New", Consolas, monospace;
+  padding: 6px 8px;
+  box-shadow: inset 3px 3px 0 rgba(0, 0, 0, 0.38);
+}
+
+.score-form input:focus {
+  border-color: var(--accent);
+}
+
+.score-form input:disabled {
+  color: var(--muted);
+  opacity: 0.75;
+}
+
+.score-form button {
+  min-height: 38px;
+}
+
 #leaderboardSelect {
   width: 100%;
   min-height: 230px;
@@ -316,6 +368,19 @@ button:active {
 
   .brand,
   .controls {
+    grid-column: 1 / -1;
+  }
+
+  .leaderboard {
+    width: min(100%, 720px);
+  }
+
+  .score-form {
+    grid-template-columns: 1fr auto;
+  }
+
+  .score-form label,
+  #scoreMessage {
     grid-column: 1 / -1;
   }
 }

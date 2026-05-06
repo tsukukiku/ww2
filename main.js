@@ -3,6 +3,10 @@ const ctx = canvas.getContext("2d");
 const overlay = document.querySelector("#overlay");
 const startButton = document.querySelector("#startButton");
 const leaderboardSelect = document.querySelector("#leaderboardSelect");
+const scoreForm = document.querySelector("#scoreForm");
+const pilotNameInput = document.querySelector("#pilotName");
+const saveScoreButton = document.querySelector("#saveScoreButton");
+const scoreMessage = document.querySelector("#scoreMessage");
 const LEADERBOARD_KEY = "skyFront1944Leaderboard";
 const LEADERBOARD_LIMIT = 10;
 
@@ -96,6 +100,7 @@ function startGame() {
   state.running = true;
   setPixelTitle("SKY FRONT 1944");
   startButton.textContent = "SORTIE";
+  hideScoreForm();
   overlay.classList.add("hidden");
   lastTime = performance.now();
   cancelAnimationFrame(animationId);
@@ -106,7 +111,7 @@ function endGame() {
   state.running = false;
   overlay.classList.remove("hidden");
   setPixelTitle("GAME OVER");
-  submitScorePrompt();
+  showScoreForm();
   startButton.textContent = "FLY AGAIN";
 }
 
@@ -316,10 +321,11 @@ function startBoss() {
     startJu288();
     return;
   }
+  const me262Hp = (98 + state.stage * 18) * 3;
   state.boss = {
     kind: "me262",
-    hp: 98 + state.stage * 18,
-    maxHp: 98 + state.stage * 18,
+    hp: me262Hp,
+    maxHp: me262Hp,
     mode: "raid",
     timer: 0,
     raidsLeft: 5,
@@ -330,7 +336,7 @@ function startBoss() {
 }
 
 function startJu288() {
-  const bodyHp = 260 + state.stage * 44;
+  const bodyHp = (260 + state.stage * 44) * 2;
   const engineHp = 70 + state.stage * 12;
   const gunMounts = [
     { x: -112, y: 72 }, { x: -70, y: 88 }, { x: -28, y: 96 }, { x: 28, y: 96 }, { x: 70, y: 88 }, { x: 112, y: 72 },
@@ -385,14 +391,25 @@ function setupBossRaid() {
 
 function setupBossHover() {
   const boss = state.boss;
-  boss.mode = "hover";
-  boss.timer = 4.2;
-  boss.shotTimer = 999;
-  boss.planes = [
-    { x: W / 2 - 58, y: 94, vx: 0, vy: 0, angle: Math.PI / 2 },
-    { x: W / 2, y: 72, vx: 0, vy: 0, angle: Math.PI / 2 },
-    { x: W / 2 + 58, y: 94, vx: 0, vy: 0, angle: Math.PI / 2 }
+  const fromLeft = Math.random() < 0.5;
+  const startX = fromLeft ? -92 : W + 92;
+  const targets = [
+    { x: W / 2 - 58, y: 94 },
+    { x: W / 2, y: 72 },
+    { x: W / 2 + 58, y: 94 }
   ];
+  boss.mode = "hoverEnter";
+  boss.timer = 2.1;
+  boss.shotTimer = 999;
+  boss.planes = targets.map((target, index) => ({
+    x: startX + (fromLeft ? -index * 42 : index * 42),
+    y: target.y + 10 + index * 16,
+    vx: 0,
+    vy: 0,
+    angle: -Math.PI / 2,
+    targetX: target.x,
+    targetY: target.y
+  }));
 }
 
 function updateBoss(dt) {
@@ -405,8 +422,16 @@ function updateBoss(dt) {
 
   boss.timer -= dt;
   boss.shotTimer -= dt;
+  let hoverEnterSettled = boss.mode === "hoverEnter";
   for (const plane of boss.planes) {
-    if (boss.mode === "hover") {
+    if (boss.mode === "hoverEnter") {
+      const dx = plane.targetX - plane.x;
+      const dy = plane.targetY - plane.y;
+      plane.x += dx * Math.min(1, dt * 2.4);
+      plane.y += dy * Math.min(1, dt * 2.4);
+      plane.angle = -Math.PI / 2;
+      if (Math.hypot(dx, dy) > 3) hoverEnterSettled = false;
+    } else if (boss.mode === "hover") {
       plane.x += Math.sin(state.t * 2.2 + plane.y) * 16 * dt;
       plane.y += Math.cos(state.t * 2 + plane.x) * 8 * dt;
     } else {
@@ -414,6 +439,12 @@ function updateBoss(dt) {
       plane.y += plane.vy * dt;
     }
     if (boss.hp < boss.maxHp * 0.5) trailSmoke(plane.x, plane.y, plane.angle + Math.PI, 0.6);
+  }
+
+  if (hoverEnterSettled) {
+    boss.mode = "hover";
+    boss.timer = 4.2;
+    boss.shotTimer = 999;
   }
 
   if (boss.mode === "raid" && boss.shotTimer <= 0) {
@@ -434,12 +465,13 @@ function updateBoss(dt) {
 }
 
 function fireBossForward(plane) {
+  const bulletSpeed = 880;
   for (const offset of [-6, 6]) {
     state.enemyBullets.push({
       x: plane.x + Math.cos(plane.angle + Math.PI / 2) * offset,
       y: plane.y + Math.sin(plane.angle + Math.PI / 2) * offset,
-      vx: Math.cos(plane.angle) * 430,
-      vy: Math.sin(plane.angle) * 430,
+      vx: Math.cos(plane.angle) * bulletSpeed + plane.vx * 0.25,
+      vy: Math.sin(plane.angle) * bulletSpeed + plane.vy * 0.25,
       r: 8,
       damage: 2,
       color: "#ffcf5a",
@@ -562,7 +594,7 @@ function updateEnemies(dt) {
   for (const e of state.enemies) {
     e.x += e.vx * dt;
     e.y += e.vy * dt;
-    if (e.type !== "v1" && e.type !== "v2") e.x += Math.sin(state.t * 2.1 + e.y * 0.02) * 18 * dt;
+    if (e.type === "bf110") e.x += Math.sin(state.t * 2.1 + e.y * 0.02) * 18 * dt;
     if (e.hp < e.maxHp * 0.5 && e.type !== "v1" && e.type !== "v2") trailSmoke(e.x, e.y - Math.sign(e.vy) * e.h * 0.45, e.vy >= 0 ? -Math.PI / 2 : Math.PI / 2, 1);
 
     if (state.phase === "retreat" && e.type !== "v1") {
@@ -1675,6 +1707,49 @@ function addLeaderboardScore(name, score) {
   renderLeaderboard(next);
 }
 
+function hideScoreForm() {
+  if (!scoreForm) return;
+  scoreForm.classList.remove("hidden");
+  if (pilotNameInput) {
+    pilotNameInput.value = "";
+    pilotNameInput.placeholder = "guest score";
+    pilotNameInput.disabled = true;
+  }
+  if (saveScoreButton) saveScoreButton.disabled = true;
+  if (scoreMessage) scoreMessage.textContent = "Finish a sortie to save your score";
+}
+
+function showScoreForm() {
+  if (state.scoreSubmitted) return;
+  if (!scoreForm) {
+    submitCurrentScore("");
+    return;
+  }
+  const finalScore = Math.max(0, Math.floor(state.score));
+  scoreForm.classList.remove("hidden");
+  if (saveScoreButton) saveScoreButton.disabled = false;
+  if (scoreMessage) scoreMessage.textContent = `Final score: ${finalScore}`;
+  if (pilotNameInput) {
+    pilotNameInput.value = "";
+    pilotNameInput.placeholder = `guest ${finalScore}`;
+    pilotNameInput.disabled = false;
+    pilotNameInput.focus();
+  }
+}
+
+function submitCurrentScore(name) {
+  if (state.scoreSubmitted) return;
+  state.scoreSubmitted = true;
+  const finalScore = Math.max(0, Math.floor(state.score));
+  addLeaderboardScore(normalizePlayerName(name, finalScore), finalScore);
+  if (scoreMessage) scoreMessage.textContent = "Score saved";
+  if (pilotNameInput) {
+    pilotNameInput.value = "";
+    pilotNameInput.disabled = true;
+  }
+  if (saveScoreButton) saveScoreButton.disabled = true;
+}
+
 function renderLeaderboard(scores = readLeaderboard()) {
   if (!leaderboardSelect) return;
   leaderboardSelect.innerHTML = "";
@@ -1693,17 +1768,6 @@ function renderLeaderboard(scores = readLeaderboard()) {
     option.textContent = `${String(index + 1).padStart(2, "0")}  ${entry.name}  ${entry.score}`;
     leaderboardSelect.append(option);
   });
-}
-
-function submitScorePrompt() {
-  if (state.scoreSubmitted) return;
-  state.scoreSubmitted = true;
-  const finalScore = Math.max(0, Math.floor(state.score));
-
-  window.setTimeout(() => {
-    const input = window.prompt("Enter pilot name. Leave blank to save as guest score.", "");
-    addLeaderboardScore(normalizePlayerName(input, finalScore), finalScore);
-  }, 120);
 }
 
 function updateHud() {
@@ -1740,6 +1804,13 @@ for (const button of document.querySelectorAll("[data-touch]")) {
 
 startButton.addEventListener("click", startGame);
 
+if (scoreForm) {
+  scoreForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    submitCurrentScore(pilotNameInput?.value || "");
+  });
+}
+
 function setPointerAim(event, firing) {
   const rect = canvas.getBoundingClientRect();
   pointerAim.x = ((event.clientX - rect.left) / rect.width) * W;
@@ -1775,3 +1846,4 @@ setPixelTitle("SKY FRONT 1944");
 draw();
 updateHud();
 renderLeaderboard();
+hideScoreForm();

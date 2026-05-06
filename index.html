@@ -49,6 +49,12 @@
 
       <section class="leaderboard" aria-label="leaderboard">
         <div class="leaderboard-title">TOP SCORES</div>
+        <form id="scoreForm" class="score-form">
+          <label for="pilotName">Pilot Name</label>
+          <input id="pilotName" name="pilotName" type="text" maxlength="18" autocomplete="off" placeholder="guest score" disabled>
+          <button id="saveScoreButton" type="submit" disabled>SAVE</button>
+          <span id="scoreMessage" aria-live="polite">Finish a sortie to save your score</span>
+        </form>
         <select id="leaderboardSelect" size="10" aria-label="top 10 scores"></select>
       </section>
     </main>
