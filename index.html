@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Sky Front 1944</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="game-panel" aria-label="Sky Front 1944">
+        <canvas id="game" width="480" height="720"></canvas>
+        <div id="overlay" class="overlay">
+          <div class="title">Sky Front 1944</div>
+          <button id="startButton" type="button">&#20986;&#25731;</button>
+        </div>
+      </section>
+
+      <aside class="hud" aria-label="status">
+        <div class="brand">Sky Front 1944</div>
+        <div class="stat">
+          <span>Score</span>
+          <strong id="score">0</strong>
+        </div>
+        <div class="stat">
+          <span>Stage</span>
+          <strong id="wave">1</strong>
+        </div>
+        <div class="stat">
+          <span>Armor</span>
+          <strong id="lives">5</strong>
+        </div>
+        <div class="stat">
+          <span>Guns</span>
+          <strong id="power">P-51D</strong>
+        </div>
+        <div class="controls">
+          <span>Move: WASD / Arrows</span>
+          <span>Fire: Space</span>
+          <span>Pause: P</span>
+        </div>
+      </aside>
+
+      <div class="touch-controls" aria-hidden="true">
+        <button data-touch="left">&#8592;</button>
+        <button data-touch="fire">&#9679;</button>
+        <button data-touch="right">&#8594;</button>
+      </div>
+    </main>
+
+    <script src="main.js"></script>
+  </body>
+</html>
