@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ja">
+<html lang="en">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -12,7 +12,7 @@
         <canvas id="game" width="480" height="720"></canvas>
         <div id="overlay" class="overlay">
           <div class="title">Sky Front 1944</div>
-          <button id="startButton" type="button">&#20986;&#25731;</button>
+          <button id="startButton" type="button">SORTIE</button>
         </div>
       </section>
 
@@ -46,6 +46,11 @@
         <button data-touch="fire">&#9679;</button>
         <button data-touch="right">&#8594;</button>
       </div>
+
+      <section class="leaderboard" aria-label="leaderboard">
+        <div class="leaderboard-title">TOP SCORES</div>
+        <select id="leaderboardSelect" size="10" aria-label="top 10 scores"></select>
+      </section>
     </main>
 
     <script src="main.js"></script>

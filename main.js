@@ -2,6 +2,9 @@ const canvas = document.querySelector("#game");
 const ctx = canvas.getContext("2d");
 const overlay = document.querySelector("#overlay");
 const startButton = document.querySelector("#startButton");
+const leaderboardSelect = document.querySelector("#leaderboardSelect");
+const LEADERBOARD_KEY = "skyFront1944Leaderboard";
+const LEADERBOARD_LIMIT = 10;
 
 const hud = {
   score: document.querySelector("#score"),
@@ -78,6 +81,7 @@ function makeState() {
     particles: [],
     explosions: [],
     score: 0,
+    scoreSubmitted: false,
     stage: 1,
     lives: 5,
     power: 1,
@@ -91,7 +95,7 @@ function startGame() {
   state = makeState();
   state.running = true;
   setPixelTitle("SKY FRONT 1944");
-  startButton.textContent = "出撃";
+  startButton.textContent = "SORTIE";
   overlay.classList.add("hidden");
   lastTime = performance.now();
   cancelAnimationFrame(animationId);
@@ -102,7 +106,8 @@ function endGame() {
   state.running = false;
   overlay.classList.remove("hidden");
   setPixelTitle("GAME OVER");
-  startButton.textContent = "再出撃";
+  submitScorePrompt();
+  startButton.textContent = "FLY AGAIN";
 }
 
 function loop(now) {
@@ -1633,6 +1638,74 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+function readLeaderboard() {
+  try {
+    const raw = localStorage.getItem(LEADERBOARD_KEY);
+    const scores = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(scores)) return [];
+    return scores
+      .filter((entry) => entry && typeof entry.name === "string" && Number.isFinite(entry.score))
+      .map((entry) => ({
+        name: entry.name.slice(0, 24),
+        score: Math.max(0, Math.floor(entry.score))
+      }));
+  } catch {
+    return [];
+  }
+}
+
+function saveLeaderboard(scores) {
+  try {
+    localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(scores));
+  } catch {
+    // The game still runs if the browser blocks local score storage.
+  }
+}
+
+function normalizePlayerName(value, score) {
+  const name = (value || "").trim().replace(/\s+/g, " ").slice(0, 18);
+  return name || `guest ${score}`;
+}
+
+function addLeaderboardScore(name, score) {
+  const next = [...readLeaderboard(), { name, score: Math.max(0, Math.floor(score)) }]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, LEADERBOARD_LIMIT);
+  saveLeaderboard(next);
+  renderLeaderboard(next);
+}
+
+function renderLeaderboard(scores = readLeaderboard()) {
+  if (!leaderboardSelect) return;
+  leaderboardSelect.innerHTML = "";
+
+  if (scores.length === 0) {
+    const empty = document.createElement("option");
+    empty.textContent = "NO SCORES YET";
+    empty.disabled = true;
+    leaderboardSelect.append(empty);
+    return;
+  }
+
+  scores.forEach((entry, index) => {
+    const option = document.createElement("option");
+    option.value = `${entry.score}`;
+    option.textContent = `${String(index + 1).padStart(2, "0")}  ${entry.name}  ${entry.score}`;
+    leaderboardSelect.append(option);
+  });
+}
+
+function submitScorePrompt() {
+  if (state.scoreSubmitted) return;
+  state.scoreSubmitted = true;
+  const finalScore = Math.max(0, Math.floor(state.score));
+
+  window.setTimeout(() => {
+    const input = window.prompt("Enter pilot name. Leave blank to save as guest score.", "");
+    addLeaderboardScore(normalizePlayerName(input, finalScore), finalScore);
+  }, 120);
+}
+
 function updateHud() {
   hud.score.textContent = state.score;
   hud.wave.textContent = state.stage;
@@ -1701,3 +1774,4 @@ canvas.addEventListener("pointerleave", () => {
 setPixelTitle("SKY FRONT 1944");
 draw();
 updateHud();
+renderLeaderboard();
