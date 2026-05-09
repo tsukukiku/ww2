@@ -154,11 +154,11 @@ function makeState() {
 
 function loadDifficulty() {
   const stored = localStorage.getItem(DIFFICULTY_KEY);
-  return DIFFICULTY[stored] ? stored : "hard";
+  return DIFFICULTY[stored] ? stored : "easy";
 }
 
 function currentDifficulty() {
-  return DIFFICULTY[selectedDifficulty] || DIFFICULTY.hard;
+  return DIFFICULTY[selectedDifficulty] || DIFFICULTY.easy;
 }
 
 function scaleEnemySpeed(value) {
@@ -2498,7 +2498,7 @@ startButton.addEventListener("click", startGame);
 
 for (const button of difficultyButtons) {
   button.addEventListener("click", () => {
-    selectedDifficulty = DIFFICULTY[button.dataset.difficulty] ? button.dataset.difficulty : "hard";
+    selectedDifficulty = DIFFICULTY[button.dataset.difficulty] ? button.dataset.difficulty : "easy";
     localStorage.setItem(DIFFICULTY_KEY, selectedDifficulty);
     updateDifficultyButtons();
     if (selectedDifficulty === "easy") state.flak.length = 0;
