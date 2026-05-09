@@ -23,6 +23,13 @@ const keys = new Set();
 const touch = { left: false, right: false, fire: false };
 const pointerAim = { active: false, fire: false, x: W / 2, y: H - 84, lastX: W / 2 };
 const overlayTitle = overlay.querySelector(".title");
+const AIRCRAFT_ASSET_PATH = "assets/aircraft/";
+const P51_IMAGE_WIDTH = 90;
+const ME262_IMAGE_WIDTH = P51_IMAGE_WIDTH * 1.5;
+const aircraftImages = {
+  p51: loadSprite(`${AIRCRAFT_ASSET_PATH}p51d.png`),
+  me262: loadSprite(`${AIRCRAFT_ASSET_PATH}me262.png`)
+};
 
 const ENEMY = {
   bf109: { hp: 11, score: 140, w: 42, h: 42 },
@@ -31,6 +38,8 @@ const ENEMY = {
   v1: { hp: 999, score: 0, w: 22, h: 70 },
   v2: { hp: 999, score: 0, w: 24, h: 78 }
 };
+
+const ME262_ATTACKS = ["row", "random", "weave", "tripleAim", "soloWeave"];
 
 let state = makeState();
 let lastTime = performance.now();
@@ -71,7 +80,6 @@ function makeState() {
       speed: 315,
       cooldown: 0,
       invincible: 0,
-      roll: 0,
       inputX: 0,
       destroyed: false
     },
@@ -155,9 +163,9 @@ function updatePlayer(dt) {
     const targetY = clamp(pointerAim.y, 48, H - 34);
     const dxp = targetX - p.x;
     const dyp = targetY - p.y;
-    const maxMove = p.speed * 1.45 * dt;
+    const maxMove = p.speed * 2.75 * dt;
     const dist = Math.hypot(dxp, dyp);
-    if (dist <= maxMove || dist < 1) {
+    if (dist <= maxMove || dist < 2) {
       p.x = targetX;
       p.y = targetY;
     } else {
@@ -166,7 +174,6 @@ function updatePlayer(dt) {
     }
     p.inputX = clamp((p.x - pointerAim.lastX) / 18, -1, 1);
     pointerAim.lastX = p.x;
-    p.roll += (p.inputX - p.roll) * Math.min(1, dt * 10);
     if (pointerAim.fire) firePlayer();
     return;
   }
@@ -179,7 +186,6 @@ function updatePlayer(dt) {
   if (keys.has("arrowdown") || keys.has("s")) dy += 1;
 
   p.inputX = dx;
-  p.roll += (dx - p.roll) * Math.min(1, dt * 10);
   const len = Math.hypot(dx, dy) || 1;
   p.x = clamp(p.x + (dx / len) * p.speed * dt, 28, W - 28);
   p.y = clamp(p.y + (dy / len) * p.speed * dt, 48, H - 34);
@@ -198,7 +204,7 @@ function firePlayer() {
 }
 
 function addPlayerBullet(x, y, vx) {
-  state.bullets.push({ x, y, vx, vy: -590, r: 4, damage: 1.18 });
+  state.bullets.push({ x, y, vx: vx * 2, vy: -1180, r: 4, damage: 1.18 });
 }
 
 function updateSpawning(dt) {
@@ -303,7 +309,7 @@ function spawnVWeapon(kind, x) {
     x,
     y: H + 56,
     vx: 0,
-    vy: kind === "v2" ? -450 : -320,
+    vy: kind === "v2" ? -820 : -320,
     w: spec.w,
     h: spec.h,
     hp: spec.hp,
@@ -317,7 +323,7 @@ function startBoss() {
   state.phase = "boss";
   state.enemyBullets.length = 0;
   state.rockets.length = 0;
-  if (Math.random() < 0.5) {
+  if (false && Math.random() < 0.5) {
     startJu288();
     return;
   }
@@ -330,6 +336,7 @@ function startBoss() {
     timer: 0,
     raidsLeft: 5,
     shotTimer: 0.26,
+    attackQueue: pickMe262Attacks(),
     planes: []
   };
   setupBossRaid();
@@ -360,11 +367,49 @@ function startJu288() {
   };
 }
 
+function pickMe262Attacks() {
+  const pool = [...ME262_ATTACKS];
+  for (let i = pool.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return pool.slice(0, 2);
+}
+
 function setupBossRaid() {
   const boss = state.boss;
-  boss.mode = "raid";
-  boss.timer = 1.85;
-  boss.shotTimer = 0.26;
+  boss.raidWarning = null;
+  boss.raidWarnings = null;
+  boss.rowVerticalWarning = null;
+  boss.planes = [];
+  if (!boss.attackQueue || boss.attackQueue.length === 0) {
+    setupBossHover();
+    return;
+  }
+  const attack = boss.attackQueue.shift();
+  if (attack === "row") {
+    setupMe262RowRaid();
+  } else if (attack === "random") {
+    setupMe262RandomRaid();
+  } else if (attack === "weave") {
+    setupMe262Weave();
+  } else if (attack === "tripleAim") {
+    setupMe262TripleAimRaid();
+  } else if (attack === "soloWeave") {
+    setupMe262SoloWeave();
+  } else {
+    setupMe262RandomRaid();
+  }
+}
+
+function setupMe262FormationRaid() {
+  const boss = state.boss;
+  boss.planes = [];
+  boss.raidWarning = null;
+  boss.mode = "raidWarn";
+  boss.timer = 0.68;
+  boss.raidTimer = 1.05;
+  boss.shotTimer = 999;
   const side = Math.floor(Math.random() * 4);
   let sx = W / 2;
   let sy = -80;
@@ -379,14 +424,312 @@ function setupBossRaid() {
     sy = H + 80;
   }
   const angle = Math.atan2(state.player.y - sy, state.player.x - sx);
-  const speed = 525 + state.stage * 18;
-  boss.planes = [-44, 0, 44].map((offset) => ({
+  const speed = 1260 + state.stage * 42;
+  const offsets = makeFormationLineOffsets();
+  const minOffset = Math.min(...offsets);
+  const maxOffset = Math.max(...offsets);
+  const midOffset = (minOffset + maxOffset) / 2;
+  boss.raidWarning = {
+    x: sx + Math.cos(angle + Math.PI / 2) * midOffset,
+    y: sy + Math.sin(angle + Math.PI / 2) * midOffset,
+    angle,
+    width: maxOffset - minOffset + 56,
+    total: boss.timer
+  };
+  boss.planes = offsets.map((offset) => ({
     x: sx + Math.cos(angle + Math.PI / 2) * offset,
     y: sy + Math.sin(angle + Math.PI / 2) * offset,
     vx: Math.cos(angle) * speed,
     vy: Math.sin(angle) * speed,
     angle
   }));
+}
+
+function makeFormationLineOffsets() {
+  const offsets = [];
+  while (offsets.length < 3) {
+    const next = -96 + Math.random() * 192;
+    if (offsets.every((offset) => Math.abs(offset - next) > 34)) offsets.push(next);
+  }
+  return offsets.sort((a, b) => a - b);
+}
+
+function setupMe262RowRaid() {
+  const boss = state.boss;
+  boss.mode = "rowRaid";
+  boss.timer = 6.2;
+  boss.shotTimer = 0.14;
+  boss.rowLeft = 8;
+  boss.rowDirection = Math.random() < 0.5 ? 1 : -1;
+  boss.rowVerticalLeft = boss.rowLeft;
+  boss.rowVerticalToggle = 0;
+  boss.rowVerticalWarnTimer = 0;
+  boss.rowVerticalGap = 0.56;
+  boss.pendingRowVerticalStrikes = [];
+  boss.rowWarnTimer = 0;
+  boss.rowGap = 0;
+  prepareNextMe262RowStrike();
+}
+
+function prepareNextMe262RowStrike() {
+  const boss = state.boss;
+  if (boss.rowLeft <= 0) return;
+  const fromLeft = boss.rowDirection > 0;
+  const x = fromLeft ? -92 : W + 92;
+  const y = clamp(state.player.y, 70, H - 70);
+  const angle = fromLeft ? 0 : Math.PI;
+  boss.pendingRowStrike = { x, y, angle };
+  boss.raidWarning = { x, y, angle, width: 60, total: 0.3, remaining: 0.3 };
+  boss.rowWarnTimer = 0.3;
+}
+
+function launchMe262RowStrike() {
+  const boss = state.boss;
+  const strike = boss.pendingRowStrike;
+  const speed = 1030 + state.stage * 32;
+  boss.planes.push({
+    x: strike.x,
+    y: strike.y,
+    vx: Math.cos(strike.angle) * speed,
+    vy: Math.sin(strike.angle) * speed,
+    angle: strike.angle,
+    role: "rowHorizontal"
+  });
+  boss.rowLeft -= 1;
+  boss.rowDirection *= -1;
+  boss.pendingRowStrike = null;
+  boss.raidWarning = null;
+  boss.rowGap = 0.12;
+}
+
+function prepareNextMe262RowVerticalStrike() {
+  const boss = state.boss;
+  if (boss.rowVerticalLeft <= 0) return;
+  const fromTop = boss.rowVerticalToggle % 2 === 0;
+  const firstX = 42 + Math.random() * (W - 84);
+  let secondX = 42 + Math.random() * (W - 84);
+  for (let tries = 0; tries < 10 && Math.abs(secondX - firstX) < 84; tries += 1) {
+    secondX = 42 + Math.random() * (W - 84);
+  }
+  const y = fromTop ? -90 : H + 90;
+  const angle = fromTop ? Math.PI / 2 : -Math.PI / 2;
+  boss.pendingRowVerticalStrikes = [firstX, secondX].map((x) => ({ x, y, angle }));
+  boss.rowVerticalWarning = boss.pendingRowVerticalStrikes.map((strike) => ({
+    ...strike,
+    width: 48,
+    total: 0.28,
+    remaining: 0.28
+  }));
+  boss.rowVerticalWarnTimer = 0.28;
+}
+
+function launchMe262RowVerticalStrike() {
+  const boss = state.boss;
+  const speed = 970 + state.stage * 28;
+  for (const strike of boss.pendingRowVerticalStrikes) {
+    boss.planes.push({
+      x: strike.x,
+      y: strike.y,
+      vx: Math.cos(strike.angle) * speed,
+      vy: Math.sin(strike.angle) * speed,
+      angle: strike.angle,
+      role: "rowVertical"
+    });
+  }
+  boss.rowVerticalLeft -= 1;
+  boss.rowVerticalToggle += 1;
+  boss.pendingRowVerticalStrikes = [];
+  boss.rowVerticalWarning = null;
+  boss.rowVerticalGap = 0.56;
+}
+
+function setupMe262RandomRaid() {
+  const boss = state.boss;
+  boss.mode = "randomRaid";
+  boss.timer = 3.1;
+  boss.shotTimer = 0.13;
+  boss.randomLeft = 9;
+  boss.randomLaunched = 0;
+  boss.randomWarnTimer = 0;
+  boss.randomGap = 0;
+  boss.pendingRandomStrike = null;
+  prepareNextMe262RandomStrike();
+}
+
+function makeRandomMe262Strike(aimAtPlayer) {
+  const edge = Math.floor(Math.random() * 4);
+  let x = Math.random() * W;
+  let y = -88;
+  if (edge === 1) {
+    x = W + 88;
+    y = 70 + Math.random() * (H - 140);
+  } else if (edge === 2) {
+    x = Math.random() * W;
+    y = H + 88;
+  } else if (edge === 3) {
+    x = -88;
+    y = 70 + Math.random() * (H - 140);
+  }
+  const aimX = aimAtPlayer ? state.player.x : 40 + Math.random() * (W - 80);
+  const aimY = aimAtPlayer ? state.player.y : 60 + Math.random() * (H - 120);
+  const angle = Math.atan2(aimY - y, aimX - x);
+  return { x, y, angle };
+}
+
+function prepareNextMe262RandomStrike() {
+  const boss = state.boss;
+  if (boss.randomLeft <= 0) return;
+  const aimAtPlayer = boss.randomLaunched % 2 === 0;
+  const strike = makeRandomMe262Strike(aimAtPlayer);
+  boss.pendingRandomStrike = strike;
+  boss.raidWarning = { ...strike, width: 62, total: 0.36, remaining: 0.36 };
+  boss.randomWarnTimer = 0.36;
+}
+
+function launchMe262RandomStrike() {
+  const boss = state.boss;
+  const strike = boss.pendingRandomStrike;
+  const speed = 1040 + state.stage * 32;
+  boss.planes.push({
+    x: strike.x,
+    y: strike.y,
+    vx: Math.cos(strike.angle) * speed,
+    vy: Math.sin(strike.angle) * speed,
+    angle: strike.angle
+  });
+  boss.randomLeft -= 1;
+  boss.randomLaunched += 1;
+  boss.pendingRandomStrike = null;
+  boss.raidWarning = null;
+  boss.randomGap = 0.07;
+}
+
+function setupMe262TripleAimRaid() {
+  const boss = state.boss;
+  boss.mode = "tripleAim";
+  boss.timer = 4.2;
+  boss.shotTimer = 0.12;
+  boss.tripleLeft = 3;
+  boss.tripleWarnTimer = 0;
+  boss.tripleGap = 0;
+  boss.pendingTripleStrikes = [];
+  prepareNextMe262TripleAimStrike();
+}
+
+function makeEdgeSpawnPoint() {
+  const edge = Math.floor(Math.random() * 4);
+  if (edge === 0) return { x: 36 + Math.random() * (W - 72), y: -88 };
+  if (edge === 1) return { x: W + 88, y: 56 + Math.random() * (H - 112) };
+  if (edge === 2) return { x: 36 + Math.random() * (W - 72), y: H + 88 };
+  return { x: -88, y: 56 + Math.random() * (H - 112) };
+}
+
+function prepareNextMe262TripleAimStrike() {
+  const boss = state.boss;
+  if (boss.tripleLeft <= 0) return;
+  const aimX = state.player.x;
+  const aimY = state.player.y;
+  const strikes = Array.from({ length: 3 }, () => {
+    const point = makeEdgeSpawnPoint();
+    const angle = Math.atan2(aimY - point.y, aimX - point.x);
+    return { ...point, angle };
+  });
+  boss.pendingTripleStrikes = strikes;
+  boss.raidWarnings = strikes.map((strike) => ({
+    ...strike,
+    width: 62,
+    total: 0.48,
+    remaining: 0.48
+  }));
+  boss.tripleWarnTimer = 0.48;
+}
+
+function launchMe262TripleAimStrike() {
+  const boss = state.boss;
+  const speed = 1120 + state.stage * 34;
+  for (const strike of boss.pendingTripleStrikes) {
+    boss.planes.push({
+      x: strike.x,
+      y: strike.y,
+      vx: Math.cos(strike.angle) * speed,
+      vy: Math.sin(strike.angle) * speed,
+      angle: strike.angle
+    });
+  }
+  boss.tripleLeft -= 1;
+  boss.pendingTripleStrikes = [];
+  boss.raidWarnings = null;
+  boss.tripleGap = 0.16;
+}
+
+function setupMe262Weave() {
+  const boss = state.boss;
+  boss.mode = "weave";
+  boss.timer = 5.6;
+  boss.shotTimer = 0.08;
+  boss.weaveTime = 0;
+  boss.weaveSetsLeft = 2;
+  boss.weaveLaneX = 96 + Math.random() * (W - 192);
+  boss.weaveLaneWidth = 82;
+  boss.weavePass = "down";
+  boss.planes = [
+    { x: boss.weaveLaneX - 48, y: -68, vx: 0, vy: 790, angle: Math.PI / 2, phase: 0 },
+    { x: boss.weaveLaneX + 48, y: -108, vx: 0, vy: 790, angle: Math.PI / 2, phase: Math.PI },
+    { x: boss.weaveLaneX, y: -148, vx: 0, vy: 745, angle: Math.PI / 2, phase: Math.PI / 2 }
+  ];
+}
+
+function setupMe262WeaveDown() {
+  const boss = state.boss;
+  boss.weavePass = "down";
+  boss.weaveTime = 0;
+  boss.weaveLaneX = 96 + Math.random() * (W - 192);
+  boss.weaveLaneWidth = 82;
+  boss.planes = [
+    { x: boss.weaveLaneX - 48, y: -68, vx: 0, vy: 790, angle: Math.PI / 2, phase: 0 },
+    { x: boss.weaveLaneX + 48, y: -108, vx: 0, vy: 790, angle: Math.PI / 2, phase: Math.PI },
+    { x: boss.weaveLaneX, y: -148, vx: 0, vy: 745, angle: Math.PI / 2, phase: Math.PI / 2 }
+  ];
+}
+
+function setupMe262WeaveReturn() {
+  const boss = state.boss;
+  boss.weavePass = "up";
+  boss.weaveTime = 0;
+  boss.planes = [
+    { x: boss.weaveLaneX + 48, y: H + 68, vx: 0, vy: -790, angle: -Math.PI / 2, phase: Math.PI },
+    { x: boss.weaveLaneX - 48, y: H + 108, vx: 0, vy: -790, angle: -Math.PI / 2, phase: 0 },
+    { x: boss.weaveLaneX, y: H + 148, vx: 0, vy: -745, angle: -Math.PI / 2, phase: Math.PI / 2 }
+  ];
+}
+
+function setupMe262SoloWeave() {
+  const boss = state.boss;
+  boss.mode = "soloWeave";
+  boss.timer = 6.8;
+  boss.shotTimer = 999;
+  boss.soloWeaveLeft = 4;
+  setupMe262SoloWeaveDown();
+}
+
+function setupMe262SoloWeaveDown() {
+  const boss = state.boss;
+  boss.soloWeavePass = "down";
+  boss.soloWeaveTime = 0;
+  boss.soloWeaveWidth = 64;
+  boss.soloWeaveX = 78 + Math.random() * (W - 156);
+  boss.planes = [
+    { x: boss.soloWeaveX, laneX: boss.soloWeaveX, y: -86, vx: 0, vy: 690, angle: Math.PI / 2, phase: Math.random() * Math.PI * 2 }
+  ];
+}
+
+function setupMe262SoloWeaveReturn() {
+  const boss = state.boss;
+  boss.soloWeavePass = "up";
+  boss.soloWeaveTime = 0;
+  boss.planes = [
+    { x: boss.soloWeaveX, laneX: boss.soloWeaveX, y: H + 86, vx: 0, vy: -690, angle: -Math.PI / 2, phase: Math.random() * Math.PI * 2 }
+  ];
 }
 
 function setupBossHover() {
@@ -399,7 +742,7 @@ function setupBossHover() {
     { x: W / 2 + 58, y: 94 }
   ];
   boss.mode = "hoverEnter";
-  boss.timer = 2.1;
+  boss.timer = 1.35;
   boss.shotTimer = 999;
   boss.planes = targets.map((target, index) => ({
     x: startX + (fromLeft ? -index * 42 : index * 42),
@@ -412,6 +755,20 @@ function setupBossHover() {
   }));
 }
 
+function setupBossHoverExit() {
+  const boss = state.boss;
+  boss.mode = "hoverExit";
+  boss.timer = 0.95;
+  boss.shotTimer = 999;
+  boss.planes.forEach((plane, index) => {
+    plane.targetX = plane.x + (index - 1) * 10;
+    plane.targetY = -118 - index * 24;
+    plane.vx = 0;
+    plane.vy = 0;
+    plane.angle = -Math.PI / 2;
+  });
+}
+
 function updateBoss(dt) {
   const boss = state.boss;
   if (!boss) return;
@@ -422,18 +779,40 @@ function updateBoss(dt) {
 
   boss.timer -= dt;
   boss.shotTimer -= dt;
+  updateMe262PatternTimers(dt);
   let hoverEnterSettled = boss.mode === "hoverEnter";
+  let hoverExitSettled = boss.mode === "hoverExit";
   for (const plane of boss.planes) {
     if (boss.mode === "hoverEnter") {
       const dx = plane.targetX - plane.x;
       const dy = plane.targetY - plane.y;
-      plane.x += dx * Math.min(1, dt * 2.4);
-      plane.y += dy * Math.min(1, dt * 2.4);
+      plane.x += dx * Math.min(1, dt * 3.4);
+      plane.y += dy * Math.min(1, dt * 3.4);
       plane.angle = -Math.PI / 2;
       if (Math.hypot(dx, dy) > 3) hoverEnterSettled = false;
+    } else if (boss.mode === "hoverExit") {
+      const dx = plane.targetX - plane.x;
+      const dy = plane.targetY - plane.y;
+      plane.x += dx * Math.min(1, dt * 3.1);
+      plane.y += dy * Math.min(1, dt * 3.1);
+      plane.angle = -Math.PI / 2;
+      if (Math.hypot(dx, dy) > 4) hoverExitSettled = false;
     } else if (boss.mode === "hover") {
       plane.x += Math.sin(state.t * 2.2 + plane.y) * 16 * dt;
       plane.y += Math.cos(state.t * 2 + plane.x) * 8 * dt;
+    } else if (boss.mode === "raidWarn") {
+      plane.angle = boss.raidWarning.angle;
+    } else if (boss.mode === "weave") {
+      const oldX = plane.x;
+      plane.y += plane.vy * dt;
+      plane.x = boss.weaveLaneX + Math.sin(boss.weaveTime * 4.2 + plane.phase) * (boss.weaveLaneWidth / 2);
+      plane.angle = Math.atan2(plane.vy, (plane.x - oldX) / Math.max(dt, 0.001));
+      plane.firingVertical = Math.abs(plane.angle - Math.PI / 2) < 0.16;
+    } else if (boss.mode === "soloWeave") {
+      const oldX = plane.x;
+      plane.y += plane.vy * dt;
+      plane.x = plane.laneX + Math.sin(boss.soloWeaveTime * 5.0 + plane.phase) * (boss.soloWeaveWidth / 2);
+      plane.angle = Math.atan2(plane.vy, (plane.x - oldX) / Math.max(dt, 0.001));
     } else {
       plane.x += plane.vx * dt;
       plane.y += plane.vy * dt;
@@ -443,29 +822,115 @@ function updateBoss(dt) {
 
   if (hoverEnterSettled) {
     boss.mode = "hover";
-    boss.timer = 4.2;
+    boss.timer = 0.75;
     boss.shotTimer = 999;
   }
 
-  if (boss.mode === "raid" && boss.shotTimer <= 0) {
-    boss.shotTimer = 0.18;
+  if (boss.mode === "weave" && boss.weavePass === "down" && boss.planes.every((plane) => plane.y > H + 150)) {
+    setupMe262WeaveReturn();
+  } else if (boss.mode === "weave" && boss.weavePass === "up" && boss.planes.every((plane) => plane.y < -150)) {
+    boss.weaveSetsLeft -= 1;
+    if (boss.weaveSetsLeft > 0) setupMe262WeaveDown();
+    else finishMe262Attack();
+  } else if (boss.mode === "soloWeave" && boss.soloWeavePass === "down" && boss.planes.every((plane) => plane.y > H + 140)) {
+    setupMe262SoloWeaveReturn();
+  } else if (boss.mode === "soloWeave" && boss.soloWeavePass === "up" && boss.planes.every((plane) => plane.y < -140)) {
+    boss.soloWeaveLeft -= 1;
+    if (boss.soloWeaveLeft > 0) setupMe262SoloWeaveDown();
+    else finishMe262Attack();
+  }
+
+  if (boss.mode === "raidWarn" && boss.timer <= 0) {
+    boss.mode = "raid";
+    boss.timer = boss.raidTimer;
+    boss.shotTimer = 0.04;
+    boss.raidWarning = null;
+  }
+
+  if (hoverExitSettled) {
+    boss.attackQueue = pickMe262Attacks();
+    setupBossRaid();
+  }
+
+  if (["raid", "rowRaid", "randomRaid", "weave", "tripleAim", "soloWeave"].includes(boss.mode) && boss.shotTimer <= 0) {
+    boss.shotTimer = boss.mode === "weave" ? 0.095 : 0.15;
     for (const plane of boss.planes) {
+      if (boss.mode === "weave" || boss.mode === "soloWeave") continue;
       fireBossForward(plane);
     }
   }
 
   if (boss.mode === "raid" && boss.timer <= 0) {
-    boss.raidsLeft -= 1;
-    if (boss.raidsLeft <= 0) setupBossHover();
-    else setupBossRaid();
+    boss.formationRepeats = Math.max(0, (boss.formationRepeats || 1) - 1);
+    if (boss.formationRepeats > 0) setupMe262FormationRaid();
+    else finishMe262Attack();
+  } else if (boss.mode === "rowRaid" && boss.rowLeft <= 0 && !boss.raidWarning && !boss.rowVerticalWarning && boss.planes.length === 0) {
+    finishMe262Attack();
+  } else if (boss.mode === "randomRaid" && boss.randomLeft <= 0 && !boss.raidWarning && boss.planes.length === 0) {
+    finishMe262Attack();
+  } else if (boss.mode === "tripleAim" && boss.tripleLeft <= 0 && !boss.raidWarnings && boss.planes.length === 0) {
+    finishMe262Attack();
   } else if (boss.mode === "hover" && boss.timer <= 0) {
-    boss.raidsLeft = 3;
-    setupBossRaid();
+    setupBossHoverExit();
   }
 }
 
+function updateMe262PatternTimers(dt) {
+  const boss = state.boss;
+  if (boss.mode === "rowRaid") {
+    boss.rowWarnTimer -= dt;
+    boss.rowGap -= dt;
+    boss.rowVerticalWarnTimer -= dt;
+    boss.rowVerticalGap -= dt;
+    const horizontalActive = boss.planes.some((plane) => plane.role === "rowHorizontal");
+    const verticalActive = boss.planes.some((plane) => plane.role === "rowVertical");
+    if (boss.raidWarning) boss.raidWarning.remaining = Math.max(0, boss.rowWarnTimer);
+    if (boss.rowVerticalWarning) boss.rowVerticalWarning.remaining = Math.max(0, boss.rowVerticalWarnTimer);
+    if (boss.rowWarnTimer <= 0 && boss.raidWarning) launchMe262RowStrike();
+    if (boss.rowVerticalWarnTimer <= 0 && boss.rowVerticalWarning) launchMe262RowVerticalStrike();
+    if (!boss.raidWarning && boss.rowGap <= 0 && boss.rowLeft > 0 && !horizontalActive) prepareNextMe262RowStrike();
+    if (!boss.rowVerticalWarning && boss.rowVerticalGap <= 0 && boss.rowVerticalLeft > 0 && (boss.rowLeft > 0 || horizontalActive) && !verticalActive) prepareNextMe262RowVerticalStrike();
+  } else if (boss.mode === "randomRaid") {
+    boss.randomWarnTimer -= dt;
+    boss.randomGap -= dt;
+    if (boss.raidWarning) boss.raidWarning.remaining = Math.max(0, boss.randomWarnTimer);
+    if (boss.randomWarnTimer <= 0 && boss.raidWarning) launchMe262RandomStrike();
+    if (!boss.raidWarning && boss.randomGap <= 0 && boss.randomLeft > 0) prepareNextMe262RandomStrike();
+  } else if (boss.mode === "tripleAim") {
+    boss.tripleWarnTimer -= dt;
+    boss.tripleGap -= dt;
+    if (boss.raidWarnings) {
+      for (const warning of boss.raidWarnings) warning.remaining = Math.max(0, boss.tripleWarnTimer);
+    }
+    if (boss.tripleWarnTimer <= 0 && boss.raidWarnings) launchMe262TripleAimStrike();
+    if (!boss.raidWarnings && boss.tripleGap <= 0 && boss.tripleLeft > 0) prepareNextMe262TripleAimStrike();
+  } else if (boss.mode === "weave") {
+    boss.weaveTime += dt;
+  } else if (boss.mode === "soloWeave") {
+    boss.soloWeaveTime += dt;
+  }
+
+  if (boss.mode === "rowRaid" || boss.mode === "randomRaid" || boss.mode === "tripleAim") {
+    boss.planes = boss.planes.filter((plane) => !isMe262PlaneOffscreen(plane));
+  }
+}
+
+function finishMe262Attack() {
+  const boss = state.boss;
+  boss.raidWarning = null;
+  boss.raidWarnings = null;
+  boss.rowVerticalWarning = null;
+  boss.planes = [];
+  if (boss.attackQueue && boss.attackQueue.length > 0) setupBossRaid();
+  else setupBossHover();
+}
+
+function isMe262PlaneOffscreen(plane) {
+  return plane.x < -170 || plane.x > W + 170 || plane.y < -170 || plane.y > H + 170;
+}
+
 function fireBossForward(plane) {
-  const bulletSpeed = 880;
+  const bulletSpeed = 1760;
   for (const offset of [-6, 6]) {
     state.enemyBullets.push({
       x: plane.x + Math.cos(plane.angle + Math.PI / 2) * offset,
@@ -476,7 +941,8 @@ function fireBossForward(plane) {
       damage: 2,
       color: "#ffcf5a",
       tracer: true,
-      len: 28
+      len: 28,
+      source: "me262"
     });
   }
 }
@@ -538,8 +1004,8 @@ function fireJu288Gun(gun) {
     state.enemyBullets.push({
       x,
       y,
-      vx: Math.cos(aim + spread) * 335,
-      vy: Math.sin(aim + spread) * 335,
+      vx: Math.cos(aim + spread) * 670,
+      vy: Math.sin(aim + spread) * 670,
       r: 8,
       damage: 1,
       color: "#ffb45c",
@@ -619,7 +1085,7 @@ function updateBf109(e, dt) {
         x: e.x + offset,
         y: e.y + 24,
         vx: 0,
-        vy: 420,
+        vy: 610,
         r: 8,
         damage: 1,
         color: offset === 0 ? "#ffcf5a" : "#e8674f",
@@ -674,7 +1140,7 @@ function updateFw190(e, dt) {
 function burstAtPlayer(x, y, speed, damage, radius, highPower) {
   const aim = Math.atan2(state.player.y - y, state.player.x - x);
   const wobble = (Math.random() - 0.5) * 0.12;
-  const tunedSpeed = speed * 1.12;
+  const tunedSpeed = speed * 2.24;
   state.enemyBullets.push({
     x,
     y,
@@ -705,8 +1171,8 @@ function updateProjectiles(dt) {
     r.angle = Math.atan2(r.vy, r.vx);
     trailSmoke(r.x - Math.cos(r.angle) * 10, r.y - Math.sin(r.angle) * 10, r.angle + Math.PI, 1.4);
   }
-  state.bullets = state.bullets.filter((b) => b.y > -30 && b.x > -30 && b.x < W + 30);
-  state.enemyBullets = state.enemyBullets.filter((b) => b.y > -40 && b.y < H + 40 && b.x > -40 && b.x < W + 40);
+  state.bullets = state.bullets.filter((b) => b.y > -80 && b.x > -60 && b.x < W + 60);
+  state.enemyBullets = state.enemyBullets.filter((b) => b.y > -90 && b.y < H + 90 && b.x > -90 && b.x < W + 90);
   state.rockets = state.rockets.filter((r) => r.y > -80 && r.y < H + 80 && r.x > -80 && r.x < W + 80);
 }
 
@@ -1061,6 +1527,21 @@ function drawFlakWarnings() {
 }
 
 function drawWarnings() {
+  if (state.boss?.kind === "me262" && state.boss.rowVerticalWarning) {
+    const warnings = Array.isArray(state.boss.rowVerticalWarning) ? state.boss.rowVerticalWarning : [state.boss.rowVerticalWarning];
+    for (const warning of warnings) drawMe262RaidWarning(warning, warning.remaining ?? 0);
+  }
+
+  if (state.boss?.kind === "me262" && state.boss.raidWarnings) {
+    for (const warning of state.boss.raidWarnings) {
+      drawMe262RaidWarning(warning, warning.remaining ?? 0);
+    }
+  }
+
+  if (state.boss?.kind === "me262" && state.boss.raidWarning) {
+    drawMe262RaidWarning(state.boss.raidWarning, state.boss.raidWarning.remaining ?? Math.max(0, state.boss.timer));
+  }
+
   for (const w of state.warnings) {
     if (w.done) continue;
     const alpha = 0.16 + Math.sin(state.t * 18) * 0.07;
@@ -1071,13 +1552,43 @@ function drawWarnings() {
   }
 }
 
+function drawMe262RaidWarning(warning, remaining) {
+  const pulse = 0.16 + Math.sin(state.t * 20) * 0.06;
+  const fade = clamp(remaining / warning.total, 0, 1);
+  const length = W + H + 260;
+  ctx.save();
+  ctx.translate(warning.x, warning.y);
+  ctx.rotate(warning.angle);
+  ctx.fillStyle = `rgba(235, 28, 28, ${pulse + (1 - fade) * 0.08})`;
+  ctx.fillRect(-90, -warning.width / 2, length, warning.width);
+  ctx.fillStyle = "rgba(255, 230, 230, 0.76)";
+  for (let x = -70; x < length; x += 32) px(x, -3, 18, 6);
+  ctx.fillStyle = "rgba(255, 90, 70, 0.26)";
+  ctx.fillRect(-90, -warning.width / 2 - 4, length, 4);
+  ctx.fillRect(-90, warning.width / 2, length, 4);
+  ctx.restore();
+}
+
+function loadSprite(src) {
+  const image = new Image();
+  image.src = src;
+  return image;
+}
+
+function drawAircraftImage(image, width) {
+  if (!image.complete || image.naturalWidth === 0) return false;
+  const height = width * (image.naturalHeight / image.naturalWidth);
+  ctx.drawImage(image, -width / 2, -height / 2, width, height);
+  return true;
+}
+
 function drawPlayer() {
   const p = state.player;
   if (p.destroyed) return;
   if (p.invincible > 0 && Math.floor(state.t * 18) % 2 === 0) return;
   ctx.save();
   ctx.translate(Math.round(p.x), Math.round(p.y));
-  drawP51D(p.roll);
+  drawP51D();
   ctx.restore();
 }
 
@@ -1105,7 +1616,9 @@ function drawBoss() {
     drawJu288Boss(boss);
     return;
   }
+  const hidePlanesForWarning = boss.mode === "raidWarn";
   for (const plane of boss.planes) {
+    if (hidePlanesForWarning) continue;
     ctx.save();
     ctx.translate(Math.round(plane.x), Math.round(plane.y));
     ctx.rotate(plane.angle + Math.PI / 2);
@@ -1148,8 +1661,9 @@ function drawJu288Boss(boss) {
   ctx.fillText("Ju 288 Heavy Bomber", W / 2, 36);
 }
 
-function drawP51D(roll) {
-  const shade = roll > 0.08 ? 3 : roll < -0.08 ? -3 : 0;
+function drawP51D() {
+  if (drawAircraftImage(aircraftImages.p51, P51_IMAGE_WIDTH)) return;
+  const shade = 0;
   const flap = Math.floor(Math.sin(state.t * 42) * 2);
   ctx.fillStyle = "#e3e8eb";
   px(-3 + shade, -42, 6, 7);
@@ -1292,6 +1806,7 @@ function drawV2() {
 }
 
 function drawMe262() {
+  if (drawAircraftImage(aircraftImages.me262, ME262_IMAGE_WIDTH)) return;
   ctx.fillStyle = "#77838a";
   px(-7, -27, 14, 52);
   ctx.fillStyle = "#5a676d";
@@ -1354,11 +1869,23 @@ function drawJu288() {
 }
 
 function drawBullets() {
-  ctx.fillStyle = "#fff1a0";
-  for (const b of state.bullets) px(b.x - 2, b.y - 8, 4, 12);
-  for (const b of state.enemyBullets) {
-    drawTracer(b);
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  for (const b of state.bullets) {
+    drawGlowTracer({
+      ...b,
+      color: "#82d8ff",
+      core: "#f7ffff",
+      len: 22,
+      r: 4,
+      slim: true
+    });
   }
+  for (const b of state.enemyBullets) {
+    drawGlowTracer(b);
+  }
+  ctx.restore();
+
   for (const r of state.rockets) {
     ctx.save();
     ctx.translate(Math.round(r.x), Math.round(r.y));
@@ -1371,19 +1898,30 @@ function drawBullets() {
   }
 }
 
-function drawTracer(b) {
+function drawGlowTracer(b) {
   const angle = Math.atan2(b.vy, b.vx);
   const len = b.len || 18;
-  const thick = Math.max(6, Math.floor(b.r * 0.85));
+  const isMe262Bullet = b.source === "me262";
+  const thick = isMe262Bullet ? Math.max(4, Math.floor(b.r * 0.62)) : Math.max(2, Math.floor(b.r * 0.34));
+  const glowWidth = isMe262Bullet ? Math.max(7, Math.floor(thick * 1.35)) : Math.max(4, Math.floor(thick * 1.5));
+  const color = b.color || "#e8674f";
+  const core = b.core || "#fff8cf";
   ctx.save();
   ctx.translate(Math.round(b.x), Math.round(b.y));
   ctx.rotate(angle + Math.PI / 2);
-  ctx.fillStyle = "rgba(255, 245, 180, 0.72)";
-  px(-Math.ceil(thick / 2), -len * 0.55, thick, len);
-  ctx.fillStyle = b.color || "#e8674f";
-  px(-Math.floor(thick / 2), -len * 0.35, Math.max(2, thick - 1), len * 0.62);
-  ctx.fillStyle = "#fff8cf";
-  px(-1, -len * 0.52, 2, 5);
+  ctx.shadowColor = color;
+  ctx.shadowBlur = isMe262Bullet ? 13 : 8;
+  ctx.fillStyle = "rgba(255, 244, 168, 0.34)";
+  px(-Math.ceil(glowWidth / 2), -len * 0.72, glowWidth, len * 1.24);
+  ctx.shadowBlur = isMe262Bullet ? 9 : 5;
+  ctx.fillStyle = color;
+  px(-Math.ceil(thick / 2), -len * 0.56, thick, len);
+  ctx.shadowColor = core;
+  ctx.shadowBlur = isMe262Bullet ? 6 : 4;
+  ctx.fillStyle = core;
+  px(-1, -len * 0.44, isMe262Bullet ? 2 : 1, len * 0.68);
+  ctx.fillStyle = "#ffffff";
+  px(-1, -len * 0.5, isMe262Bullet ? 2 : 1, 6);
   ctx.restore();
 }
 
