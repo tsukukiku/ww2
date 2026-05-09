@@ -234,6 +234,41 @@ button:disabled {
   font-variant-numeric: tabular-nums;
 }
 
+.difficulty-panel {
+  display: grid;
+  gap: 8px;
+  padding: 10px 8px;
+  margin-top: 10px;
+  border: 2px solid rgba(137, 150, 107, 0.5);
+  background: rgba(13, 17, 19, 0.42);
+}
+
+.difficulty-panel > span {
+  color: var(--muted);
+}
+
+.difficulty-buttons {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 7px;
+}
+
+.difficulty-buttons button {
+  min-width: 0;
+  min-height: 36px;
+  padding: 5px 4px;
+  font-size: 0.78rem;
+  outline-width: 2px;
+  box-shadow: 3px 3px 0 #0d1113;
+}
+
+.difficulty-buttons button.active {
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.2) 0 4px, transparent 4px),
+    linear-gradient(#d7f07a 0 65%, #768d38 65% 100%);
+  color: #11180d;
+}
+
 .controls {
   display: grid;
   gap: 7px;
@@ -367,6 +402,7 @@ button:disabled {
   }
 
   .brand,
+  .difficulty-panel,
   .controls {
     grid-column: 1 / -1;
   }
@@ -414,6 +450,11 @@ button:disabled {
   .brand,
   .controls {
     display: none;
+  }
+
+  .difficulty-panel {
+    grid-column: 1 / -1;
+    margin-top: 0;
   }
 
   .stat {

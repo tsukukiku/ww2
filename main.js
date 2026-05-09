@@ -7,8 +7,10 @@ const scoreForm = document.querySelector("#scoreForm");
 const pilotNameInput = document.querySelector("#pilotName");
 const saveScoreButton = document.querySelector("#saveScoreButton");
 const scoreMessage = document.querySelector("#scoreMessage");
+const difficultyButtons = document.querySelectorAll("[data-difficulty]");
 const LEADERBOARD_KEY = "skyFront1944Leaderboard";
 const LEADERBOARD_LIMIT = 10;
+const DIFFICULTY_KEY = "skyFront1944Difficulty";
 
 const hud = {
   score: document.querySelector("#score"),
@@ -25,10 +27,16 @@ const pointerAim = { active: false, fire: false, x: W / 2, y: H - 84, lastX: W /
 const overlayTitle = overlay.querySelector(".title");
 const AIRCRAFT_ASSET_PATH = "assets/aircraft/";
 const P51_IMAGE_WIDTH = 90;
+const BF109_IMAGE_WIDTH = P51_IMAGE_WIDTH;
+const BF110_IMAGE_WIDTH = P51_IMAGE_WIDTH * 1.5;
+const FW190_IMAGE_WIDTH = P51_IMAGE_WIDTH * 0.8;
 const ME262_IMAGE_WIDTH = P51_IMAGE_WIDTH * 1.5;
 const aircraftImages = {
   p51: loadSprite(`${AIRCRAFT_ASSET_PATH}p51d.png`),
-  me262: loadSprite(`${AIRCRAFT_ASSET_PATH}me262.png`)
+  me262: loadSprite(`${AIRCRAFT_ASSET_PATH}me262.png`),
+  bf109: loadSprite(`${AIRCRAFT_ASSET_PATH}bf109.png`),
+  bf110: loadSprite(`${AIRCRAFT_ASSET_PATH}bf110.png`),
+  fw190: loadSprite(`${AIRCRAFT_ASSET_PATH}fw190.png`)
 };
 
 const ENEMY = {
@@ -39,19 +47,60 @@ const ENEMY = {
   v2: { hp: 999, score: 0, w: 24, h: 78 }
 };
 
-const ME262_ATTACKS = ["row", "random", "weave", "tripleAim", "soloWeave"];
+const ME262_ATTACKS = ["row", "random", "tripleAim", "soloWeave"];
+const DIFFICULTY = {
+  easy: {
+    enemySpeed: 0.72,
+    bulletSpeed: 0.78,
+    hp: 0.72,
+    bossHp: 0.68,
+    spawnDelay: 1.45,
+    warning: 1.7,
+    flak: false,
+    flakDelay: 1,
+    flakCount: 0,
+    killsToBossBase: 18
+  },
+  medium: {
+    enemySpeed: 0.86,
+    bulletSpeed: 0.9,
+    hp: 0.86,
+    bossHp: 0.84,
+    spawnDelay: 1.22,
+    warning: 1.35,
+    flak: true,
+    flakDelay: 1.35,
+    flakCount: 0.65,
+    killsToBossBase: 16
+  },
+  hard: {
+    enemySpeed: 1,
+    bulletSpeed: 1,
+    hp: 1,
+    bossHp: 1,
+    spawnDelay: 1,
+    warning: 1,
+    flak: true,
+    flakDelay: 1,
+    flakCount: 1,
+    killsToBossBase: 14
+  }
+};
+
+let selectedDifficulty = loadDifficulty();
 
 let state = makeState();
 let lastTime = performance.now();
 let animationId = 0;
 
 function makeState() {
+  const settings = currentDifficulty();
   return {
     running: false,
     paused: false,
     t: 0,
     scroll: 0,
-    spawnTimer: 0.7,
+    spawnTimer: scaleSpawnDelay(0.7),
     v1Timer: 6,
     phase: "skirmish",
     phaseTimer: 0,
@@ -89,7 +138,7 @@ function makeState() {
     enemies: [],
     warnings: [],
     flak: [],
-    flakTimer: 2.2,
+    flakTimer: scaleFlakDelay(2.2),
     particles: [],
     explosions: [],
     score: 0,
@@ -98,9 +147,52 @@ function makeState() {
     lives: 5,
     power: 1,
     kills: 0,
-    killsToBoss: 14,
+    killsToBoss: settings.killsToBossBase,
     gameOverTimer: null
   };
+}
+
+function loadDifficulty() {
+  const stored = localStorage.getItem(DIFFICULTY_KEY);
+  return DIFFICULTY[stored] ? stored : "hard";
+}
+
+function currentDifficulty() {
+  return DIFFICULTY[selectedDifficulty] || DIFFICULTY.hard;
+}
+
+function scaleEnemySpeed(value) {
+  return value * currentDifficulty().enemySpeed;
+}
+
+function scaleBulletSpeed(value) {
+  return value * currentDifficulty().bulletSpeed;
+}
+
+function scaleEnemyHp(value) {
+  return Math.max(1, Math.round(value * currentDifficulty().hp));
+}
+
+function scaleBossHp(value) {
+  return Math.max(1, Math.round(value * currentDifficulty().bossHp));
+}
+
+function scaleSpawnDelay(value) {
+  return value * currentDifficulty().spawnDelay;
+}
+
+function scaleWarningTime(value) {
+  return value * currentDifficulty().warning;
+}
+
+function scaleFlakDelay(value) {
+  return value * currentDifficulty().flakDelay;
+}
+
+function updateDifficultyButtons() {
+  for (const button of difficultyButtons) {
+    button.classList.toggle("active", button.dataset.difficulty === selectedDifficulty);
+  }
 }
 
 function startGame() {
@@ -226,9 +318,10 @@ function updateSpawning(dt) {
   }
 
   if (state.v1Timer <= 0) {
-    state.v1Timer = 8 + Math.random() * 5;
+    state.v1Timer = scaleSpawnDelay(8 + Math.random() * 5);
     const count = Math.random() < 0.45 ? 2 + Math.floor(Math.random() * 2) : 1;
     const used = [];
+    const warningDuration = scaleWarningTime(1.15);
     for (let i = 0; i < count; i += 1) {
       let x = 42 + Math.random() * (W - 84);
       for (let tries = 0; tries < 10 && used.some((u) => Math.abs(u - x) < 58); tries += 1) {
@@ -236,12 +329,12 @@ function updateSpawning(dt) {
       }
       used.push(x);
       const kind = Math.random() < 0.35 ? "v2" : "v1";
-      state.warnings.push({ kind, x, w: kind === "v2" ? 54 : 48, timer: 1.15 + i * 0.12, total: 1.15 });
+      state.warnings.push({ kind, x, w: kind === "v2" ? 54 : 48, timer: warningDuration + i * 0.12, total: warningDuration });
     }
   }
 
   if (state.spawnTimer > 0) return;
-  state.spawnTimer = Math.max(0.62, 1.18 - state.stage * 0.05);
+  state.spawnTimer = scaleSpawnDelay(Math.max(0.62, 1.18 - state.stage * 0.05));
   const roll = Math.random();
   if (roll < 0.5) spawnBf109();
   else if (roll < 0.78) spawnFw190();
@@ -255,11 +348,11 @@ function spawnBf109() {
     x: 36 + Math.random() * (W - 72),
     y: -48,
     vx: 0,
-    vy: 150 + state.stage * 6,
+    vy: scaleEnemySpeed(150 + state.stage * 6),
     w: spec.w,
     h: spec.h,
-    hp: spec.hp,
-    maxHp: spec.hp,
+    hp: scaleEnemyHp(spec.hp),
+    maxHp: scaleEnemyHp(spec.hp),
     shootTimer: 0.45,
     burst: 0,
     alive: true
@@ -273,11 +366,11 @@ function spawnBf110() {
     x: 46 + Math.random() * (W - 92),
     y: -52,
     vx: 0,
-    vy: 58 + state.stage * 3,
+    vy: scaleEnemySpeed(58 + state.stage * 3),
     w: spec.w,
     h: spec.h,
-    hp: spec.hp,
-    maxHp: spec.hp,
+    hp: scaleEnemyHp(spec.hp),
+    maxHp: scaleEnemyHp(spec.hp),
     shootTimer: 1.0,
     burst: 0,
     burstTimer: 0,
@@ -292,11 +385,11 @@ function spawnFw190() {
     x: 36 + Math.random() * (W - 72),
     y: -48,
     vx: 0,
-    vy: 165 + state.stage * 9,
+    vy: scaleEnemySpeed(165 + state.stage * 9),
     w: spec.w,
     h: spec.h,
-    hp: spec.hp,
-    maxHp: spec.hp,
+    hp: scaleEnemyHp(spec.hp),
+    maxHp: scaleEnemyHp(spec.hp),
     shootTimer: 0.7,
     alive: true
   });
@@ -309,7 +402,7 @@ function spawnVWeapon(kind, x) {
     x,
     y: H + 56,
     vx: 0,
-    vy: kind === "v2" ? -820 : -320,
+    vy: kind === "v2" ? -scaleEnemySpeed(820) : -320,
     w: spec.w,
     h: spec.h,
     hp: spec.hp,
@@ -327,7 +420,7 @@ function startBoss() {
     startJu288();
     return;
   }
-  const me262Hp = (98 + state.stage * 18) * 3;
+  const me262Hp = scaleBossHp((98 + state.stage * 18) * 3);
   state.boss = {
     kind: "me262",
     hp: me262Hp,
@@ -343,8 +436,8 @@ function startBoss() {
 }
 
 function startJu288() {
-  const bodyHp = (260 + state.stage * 44) * 2;
-  const engineHp = 70 + state.stage * 12;
+  const bodyHp = scaleBossHp((260 + state.stage * 44) * 2);
+  const engineHp = scaleBossHp(70 + state.stage * 12);
   const gunMounts = [
     { x: -112, y: 72 }, { x: -70, y: 88 }, { x: -28, y: 96 }, { x: 28, y: 96 }, { x: 70, y: 88 }, { x: 112, y: 72 },
     { x: -44, y: 26 }, { x: 44, y: 26 }, { x: 0, y: 58 }
@@ -407,7 +500,7 @@ function setupMe262FormationRaid() {
   boss.planes = [];
   boss.raidWarning = null;
   boss.mode = "raidWarn";
-  boss.timer = 0.68;
+  boss.timer = scaleWarningTime(0.68);
   boss.raidTimer = 1.05;
   boss.shotTimer = 999;
   const side = Math.floor(Math.random() * 4);
@@ -424,7 +517,7 @@ function setupMe262FormationRaid() {
     sy = H + 80;
   }
   const angle = Math.atan2(state.player.y - sy, state.player.x - sx);
-  const speed = 1260 + state.stage * 42;
+  const speed = scaleEnemySpeed(1260 + state.stage * 42);
   const offsets = makeFormationLineOffsets();
   const minOffset = Math.min(...offsets);
   const maxOffset = Math.max(...offsets);
@@ -479,14 +572,15 @@ function prepareNextMe262RowStrike() {
   const y = clamp(state.player.y, 70, H - 70);
   const angle = fromLeft ? 0 : Math.PI;
   boss.pendingRowStrike = { x, y, angle };
-  boss.raidWarning = { x, y, angle, width: 60, total: 0.3, remaining: 0.3 };
-  boss.rowWarnTimer = 0.3;
+  const warnTime = scaleWarningTime(0.3);
+  boss.raidWarning = { x, y, angle, width: 60, total: warnTime, remaining: warnTime };
+  boss.rowWarnTimer = warnTime;
 }
 
 function launchMe262RowStrike() {
   const boss = state.boss;
   const strike = boss.pendingRowStrike;
-  const speed = 1030 + state.stage * 32;
+  const speed = scaleEnemySpeed(1030 + state.stage * 32);
   boss.planes.push({
     x: strike.x,
     y: strike.y,
@@ -513,19 +607,20 @@ function prepareNextMe262RowVerticalStrike() {
   }
   const y = fromTop ? -90 : H + 90;
   const angle = fromTop ? Math.PI / 2 : -Math.PI / 2;
+  const warnTime = scaleWarningTime(0.28);
   boss.pendingRowVerticalStrikes = [firstX, secondX].map((x) => ({ x, y, angle }));
   boss.rowVerticalWarning = boss.pendingRowVerticalStrikes.map((strike) => ({
     ...strike,
     width: 48,
-    total: 0.28,
-    remaining: 0.28
+    total: warnTime,
+    remaining: warnTime
   }));
-  boss.rowVerticalWarnTimer = 0.28;
+  boss.rowVerticalWarnTimer = warnTime;
 }
 
 function launchMe262RowVerticalStrike() {
   const boss = state.boss;
-  const speed = 970 + state.stage * 28;
+  const speed = scaleEnemySpeed(970 + state.stage * 28);
   for (const strike of boss.pendingRowVerticalStrikes) {
     boss.planes.push({
       x: strike.x,
@@ -581,15 +676,16 @@ function prepareNextMe262RandomStrike() {
   if (boss.randomLeft <= 0) return;
   const aimAtPlayer = boss.randomLaunched % 2 === 0;
   const strike = makeRandomMe262Strike(aimAtPlayer);
+  const warnTime = scaleWarningTime(0.36);
   boss.pendingRandomStrike = strike;
-  boss.raidWarning = { ...strike, width: 62, total: 0.36, remaining: 0.36 };
-  boss.randomWarnTimer = 0.36;
+  boss.raidWarning = { ...strike, width: 62, total: warnTime, remaining: warnTime };
+  boss.randomWarnTimer = warnTime;
 }
 
 function launchMe262RandomStrike() {
   const boss = state.boss;
   const strike = boss.pendingRandomStrike;
-  const speed = 1040 + state.stage * 32;
+  const speed = scaleEnemySpeed(1040 + state.stage * 32);
   boss.planes.push({
     x: strike.x,
     y: strike.y,
@@ -634,19 +730,20 @@ function prepareNextMe262TripleAimStrike() {
     const angle = Math.atan2(aimY - point.y, aimX - point.x);
     return { ...point, angle };
   });
+  const warnTime = scaleWarningTime(0.48);
   boss.pendingTripleStrikes = strikes;
   boss.raidWarnings = strikes.map((strike) => ({
     ...strike,
     width: 62,
-    total: 0.48,
-    remaining: 0.48
+    total: warnTime,
+    remaining: warnTime
   }));
-  boss.tripleWarnTimer = 0.48;
+  boss.tripleWarnTimer = warnTime;
 }
 
 function launchMe262TripleAimStrike() {
   const boss = state.boss;
-  const speed = 1120 + state.stage * 34;
+  const speed = scaleEnemySpeed(1120 + state.stage * 34);
   for (const strike of boss.pendingTripleStrikes) {
     boss.planes.push({
       x: strike.x,
@@ -672,10 +769,12 @@ function setupMe262Weave() {
   boss.weaveLaneX = 96 + Math.random() * (W - 192);
   boss.weaveLaneWidth = 82;
   boss.weavePass = "down";
+  const fast = scaleEnemySpeed(790);
+  const mid = scaleEnemySpeed(745);
   boss.planes = [
-    { x: boss.weaveLaneX - 48, y: -68, vx: 0, vy: 790, angle: Math.PI / 2, phase: 0 },
-    { x: boss.weaveLaneX + 48, y: -108, vx: 0, vy: 790, angle: Math.PI / 2, phase: Math.PI },
-    { x: boss.weaveLaneX, y: -148, vx: 0, vy: 745, angle: Math.PI / 2, phase: Math.PI / 2 }
+    { x: boss.weaveLaneX - 48, y: -68, vx: 0, vy: fast, angle: Math.PI / 2, phase: 0 },
+    { x: boss.weaveLaneX + 48, y: -108, vx: 0, vy: fast, angle: Math.PI / 2, phase: Math.PI },
+    { x: boss.weaveLaneX, y: -148, vx: 0, vy: mid, angle: Math.PI / 2, phase: Math.PI / 2 }
   ];
 }
 
@@ -685,10 +784,12 @@ function setupMe262WeaveDown() {
   boss.weaveTime = 0;
   boss.weaveLaneX = 96 + Math.random() * (W - 192);
   boss.weaveLaneWidth = 82;
+  const fast = scaleEnemySpeed(790);
+  const mid = scaleEnemySpeed(745);
   boss.planes = [
-    { x: boss.weaveLaneX - 48, y: -68, vx: 0, vy: 790, angle: Math.PI / 2, phase: 0 },
-    { x: boss.weaveLaneX + 48, y: -108, vx: 0, vy: 790, angle: Math.PI / 2, phase: Math.PI },
-    { x: boss.weaveLaneX, y: -148, vx: 0, vy: 745, angle: Math.PI / 2, phase: Math.PI / 2 }
+    { x: boss.weaveLaneX - 48, y: -68, vx: 0, vy: fast, angle: Math.PI / 2, phase: 0 },
+    { x: boss.weaveLaneX + 48, y: -108, vx: 0, vy: fast, angle: Math.PI / 2, phase: Math.PI },
+    { x: boss.weaveLaneX, y: -148, vx: 0, vy: mid, angle: Math.PI / 2, phase: Math.PI / 2 }
   ];
 }
 
@@ -696,10 +797,12 @@ function setupMe262WeaveReturn() {
   const boss = state.boss;
   boss.weavePass = "up";
   boss.weaveTime = 0;
+  const fast = scaleEnemySpeed(790);
+  const mid = scaleEnemySpeed(745);
   boss.planes = [
-    { x: boss.weaveLaneX + 48, y: H + 68, vx: 0, vy: -790, angle: -Math.PI / 2, phase: Math.PI },
-    { x: boss.weaveLaneX - 48, y: H + 108, vx: 0, vy: -790, angle: -Math.PI / 2, phase: 0 },
-    { x: boss.weaveLaneX, y: H + 148, vx: 0, vy: -745, angle: -Math.PI / 2, phase: Math.PI / 2 }
+    { x: boss.weaveLaneX + 48, y: H + 68, vx: 0, vy: -fast, angle: -Math.PI / 2, phase: Math.PI },
+    { x: boss.weaveLaneX - 48, y: H + 108, vx: 0, vy: -fast, angle: -Math.PI / 2, phase: 0 },
+    { x: boss.weaveLaneX, y: H + 148, vx: 0, vy: -mid, angle: -Math.PI / 2, phase: Math.PI / 2 }
   ];
 }
 
@@ -717,19 +820,42 @@ function setupMe262SoloWeaveDown() {
   boss.soloWeavePass = "down";
   boss.soloWeaveTime = 0;
   boss.soloWeaveWidth = 64;
-  boss.soloWeaveX = 78 + Math.random() * (W - 156);
-  boss.planes = [
-    { x: boss.soloWeaveX, laneX: boss.soloWeaveX, y: -86, vx: 0, vy: 690, angle: Math.PI / 2, phase: Math.random() * Math.PI * 2 }
-  ];
+  boss.soloWeaveLanes = makeSoloWeaveLanes();
+  const speed = scaleEnemySpeed(690);
+  boss.planes = boss.soloWeaveLanes.map((x, index) => ({
+    x,
+    laneX: x,
+    y: -86 - index * 32,
+    vx: 0,
+    vy: speed,
+    angle: Math.PI / 2,
+    phase: Math.random() * Math.PI * 2
+  }));
 }
 
 function setupMe262SoloWeaveReturn() {
   const boss = state.boss;
   boss.soloWeavePass = "up";
   boss.soloWeaveTime = 0;
-  boss.planes = [
-    { x: boss.soloWeaveX, laneX: boss.soloWeaveX, y: H + 86, vx: 0, vy: -690, angle: -Math.PI / 2, phase: Math.random() * Math.PI * 2 }
-  ];
+  const speed = scaleEnemySpeed(690);
+  boss.planes = boss.soloWeaveLanes.map((x, index) => ({
+    x,
+    laneX: x,
+    y: H + 86 + index * 32,
+    vx: 0,
+    vy: -speed,
+    angle: -Math.PI / 2,
+    phase: Math.random() * Math.PI * 2
+  }));
+}
+
+function makeSoloWeaveLanes() {
+  const lanes = [];
+  while (lanes.length < 3) {
+    const x = 58 + Math.random() * (W - 116);
+    if (lanes.every((lane) => Math.abs(lane - x) > 74)) lanes.push(x);
+  }
+  return lanes.sort((a, b) => a - b);
 }
 
 function setupBossHover() {
@@ -930,7 +1056,7 @@ function isMe262PlaneOffscreen(plane) {
 }
 
 function fireBossForward(plane) {
-  const bulletSpeed = 1760;
+  const bulletSpeed = scaleBulletSpeed(1760);
   for (const offset of [-6, 6]) {
     state.enemyBullets.push({
       x: plane.x + Math.cos(plane.angle + Math.PI / 2) * offset,
@@ -1004,8 +1130,8 @@ function fireJu288Gun(gun) {
     state.enemyBullets.push({
       x,
       y,
-      vx: Math.cos(aim + spread) * 670,
-      vy: Math.sin(aim + spread) * 670,
+      vx: Math.cos(aim + spread) * scaleBulletSpeed(670),
+      vy: Math.sin(aim + spread) * scaleBulletSpeed(670),
       r: 8,
       damage: 1,
       color: "#ffb45c",
@@ -1027,17 +1153,24 @@ function updateWarnings(dt) {
 }
 
 function updateFlak(dt) {
+  const settings = currentDifficulty();
+  if (!settings.flak) {
+    state.flak.length = 0;
+    state.flakTimer = scaleFlakDelay(2.2);
+    return;
+  }
   state.flakTimer -= dt;
   if (state.flakTimer <= 0) {
-    state.flakTimer = 2.3 + Math.random() * 2.2;
-    const count = 2 + Math.floor(Math.random() * 4);
+    state.flakTimer = scaleFlakDelay(2.3 + Math.random() * 2.2);
+    const count = Math.max(1, Math.round((2 + Math.floor(Math.random() * 4)) * settings.flakCount));
     for (let i = 0; i < count; i += 1) {
+      const warnTime = scaleWarningTime(0.9 + Math.random() * 0.45);
       state.flak.push({
         x: 48 + Math.random() * (W - 96),
         y: 64 + Math.random() * (H - 210),
         r: 22 + Math.random() * 24,
-        timer: 0.9 + Math.random() * 0.45,
-        total: 1,
+        timer: warnTime,
+        total: warnTime,
         exploded: false,
         hitWindow: 0
       });
@@ -1085,7 +1218,7 @@ function updateBf109(e, dt) {
         x: e.x + offset,
         y: e.y + 24,
         vx: 0,
-        vy: 610,
+        vy: scaleBulletSpeed(610),
         r: 8,
         damage: 1,
         color: offset === 0 ? "#ffcf5a" : "#e8674f",
@@ -1126,10 +1259,10 @@ function updateFw190(e, dt) {
       state.rockets.push({
         x: e.x + side * 12,
         y: e.y + 18,
-        vx: Math.cos(angle) * 145,
-        vy: Math.sin(angle) * 145,
-        ax: Math.cos(angle) * 390,
-        ay: Math.sin(angle) * 390,
+        vx: Math.cos(angle) * scaleBulletSpeed(145),
+        vy: Math.sin(angle) * scaleBulletSpeed(145),
+        ax: Math.cos(angle) * scaleBulletSpeed(390),
+        ay: Math.sin(angle) * scaleBulletSpeed(390),
         angle,
         r: 8
       });
@@ -1140,7 +1273,7 @@ function updateFw190(e, dt) {
 function burstAtPlayer(x, y, speed, damage, radius, highPower) {
   const aim = Math.atan2(state.player.y - y, state.player.x - x);
   const wobble = (Math.random() - 0.5) * 0.12;
-  const tunedSpeed = speed * 2.24;
+  const tunedSpeed = scaleBulletSpeed(speed * 2.24);
   state.enemyBullets.push({
     x,
     y,
@@ -1320,9 +1453,9 @@ function killBoss() {
   }
   state.stage += 1;
   state.kills = 0;
-  state.killsToBoss = 14 + state.stage * 3;
+  state.killsToBoss = currentDifficulty().killsToBossBase + state.stage * 3;
   state.phase = "skirmish";
-  state.spawnTimer = 3;
+  state.spawnTimer = scaleSpawnDelay(3);
   state.boss = null;
 }
 
@@ -1720,6 +1853,13 @@ function drawP51D() {
 }
 
 function drawBf109() {
+  if (aircraftImages.bf109.complete && aircraftImages.bf109.naturalWidth > 0) {
+    ctx.save();
+    ctx.rotate(Math.PI);
+    drawAircraftImage(aircraftImages.bf109, BF109_IMAGE_WIDTH);
+    ctx.restore();
+    return;
+  }
   ctx.fillStyle = "#758071";
   px(-5, -24, 10, 43);
   ctx.fillStyle = "#566256";
@@ -1737,6 +1877,13 @@ function drawBf109() {
 }
 
 function drawBf110() {
+  if (aircraftImages.bf110.complete && aircraftImages.bf110.naturalWidth > 0) {
+    ctx.save();
+    ctx.rotate(Math.PI);
+    drawAircraftImage(aircraftImages.bf110, BF110_IMAGE_WIDTH);
+    ctx.restore();
+    return;
+  }
   ctx.fillStyle = "#70766d";
   px(-8, -23, 16, 45);
   ctx.fillStyle = "#5b655b";
@@ -1756,6 +1903,13 @@ function drawBf110() {
 }
 
 function drawFw190() {
+  if (aircraftImages.fw190.complete && aircraftImages.fw190.naturalWidth > 0) {
+    ctx.save();
+    ctx.rotate(Math.PI);
+    drawAircraftImage(aircraftImages.fw190, FW190_IMAGE_WIDTH);
+    ctx.restore();
+    return;
+  }
   ctx.fillStyle = "#766f62";
   px(-8, -22, 16, 43);
   ctx.fillStyle = "#5d574d";
@@ -2342,6 +2496,15 @@ for (const button of document.querySelectorAll("[data-touch]")) {
 
 startButton.addEventListener("click", startGame);
 
+for (const button of difficultyButtons) {
+  button.addEventListener("click", () => {
+    selectedDifficulty = DIFFICULTY[button.dataset.difficulty] ? button.dataset.difficulty : "hard";
+    localStorage.setItem(DIFFICULTY_KEY, selectedDifficulty);
+    updateDifficultyButtons();
+    if (selectedDifficulty === "easy") state.flak.length = 0;
+  });
+}
+
 if (scoreForm) {
   scoreForm.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -2383,5 +2546,6 @@ canvas.addEventListener("pointerleave", () => {
 setPixelTitle("SKY FRONT 1944");
 draw();
 updateHud();
+updateDifficultyButtons();
 renderLeaderboard();
 hideScoreForm();
